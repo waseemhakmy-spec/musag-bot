@@ -2,9 +2,30 @@ import os
 import glob
 import asyncio
 import time
+import threading
 import discord
 from discord.ext import commands
 import google.generativeai as genai
+from flask import Flask
+
+# =========================================================
+# 0. سيرفر ويب وهمي لإرضاء منصة Render ومنع خطأ البورت
+# =========================================================
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Musag Bot is running 24/7!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = threading.Thread(target=run_web)
+    t.start()
+
+# تشغيل السيرفر الوهمي في الخلفية
+keep_alive()
 
 # =========================================================
 # 1. مفاتيح الربط (تمت موازنتها وإضافتها)
