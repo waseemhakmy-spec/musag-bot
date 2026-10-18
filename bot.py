@@ -5,7 +5,8 @@ import time
 import threading
 import discord
 from discord.ext import commands
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from flask import Flask
 
 # =========================================================
@@ -24,15 +25,15 @@ def keep_alive():
     t = threading.Thread(target=run_web)
     t.start()
 
-# تشغيل السيرفر الوهمي في الخلفية
 keep_alive()
 
 # =========================================================
-# 1. مفاتيح الربط (تمت موازنتها وإضافتها)
+# 1. مفاتيح الربط وإعداد العميل الجديد (New SDK)
 # =========================================================
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-genai.configure(api_key=GEMINI_API_KEY)
+
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
 # 2. قراءة ورفع ملفات الأنظمة والسوابق القضائية
@@ -44,7 +45,7 @@ if os.path.exists(laws_folder):
     print("⏳ جاري فحص وقراءة مجلد الأنظمة والسوابق القضائية...")
     for file_path in glob.glob(f"{laws_folder}/*.*"):
         try:
-            file_ref = genai.upload_file(file_path=file_path)
+            file_ref = client.files.upload(file=file_path)
             uploaded_files.append(file_ref)
             print(f"✅ تم رفع: {os.path.basename(file_path)}")
         except Exception as e:
@@ -134,14 +135,12 @@ async def on_message(message):
                 contents.extend(uploaded_files)
                 contents.append(message.content)
 
-                model = genai.GenerativeModel(
-                    model_name="gemini-pro",
-                    system_instruction=SYSTEM_INSTRUCTION
-                )
-
-                response = model.generate_content(
+                # استخدام أحدث وأفضل نموذج gemini-2.0-flash
+                response = client.models.generate_content(
+                    model='gemini-2.0-flash',
                     contents=contents,
-                    generation_config=genai.types.GenerationConfig(
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTION,
                         temperature=0.2
                     )
                 )
