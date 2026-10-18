@@ -24,7 +24,7 @@ if os.path.exists(laws_folder):
            file_ref = genai.upload_file(file_path=file_path)
             uploaded_files.append(file_ref)
             print(f"✅ تم رفع: {os.path.basename(file_path)}")
-        except Exception as e:
+        except Exception as e
             print(f"❌ تعذر رفع {os.path.basename(file_path)}: {e}")
 
 # =========================================================
