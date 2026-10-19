@@ -60,17 +60,16 @@ SYSTEM_INSTRUCTION = """
 # =========================================================
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+# تفعيل إعادة الاتصال التلقائي بحدود أمان لمنع حظر الـ 429
+bot = commands.Bot(command_prefix="!", intents=intents, reconnect=True)
 
 user_cooldowns = {}
 COOLDOWN_TIME = 5
 
-# دالة لرفع الملفات في الخلفية حتى لا تعلق عملية دخول البوت
 async def load_laws_files():
     global uploaded_files
     laws_folder = "." 
     print("⏳ جاري فحص وقراءة ملفات الأنظمة والسوابق القضائية في الخلفية...")
-    
     loop = asyncio.get_event_loop()
     files_to_upload = glob.glob(f"{laws_folder}/*.txt")
     
@@ -78,7 +77,6 @@ async def load_laws_files():
         if file_path.endswith("requirements.txt"):
             continue
         try:
-            # رفع الملف بدون تعطيل الاتصال
             file_ref = await loop.run_in_executor(None, lambda: genai.upload_file(path=file_path))
             uploaded_files.append(file_ref)
             print(f"✅ تم رفع واعتماد: {os.path.basename(file_path)}")
@@ -89,12 +87,8 @@ async def load_laws_files():
 async def on_ready():
     print(f"✅ تم اتصال وتأكيد تشغيل البوت بنجاح باسم: {bot.user}")
     await bot.change_presence(activity=discord.Game(name="⚖️ الإفادات والتحليلات النظامية"))
-    # البدء في رفع الملفات بعد التأكد من أن البوت أصبح Online في ديسكورد
     asyncio.create_task(load_laws_files())
 
-# =========================================================
-# 4. الترحيب التلقائي عند فتح تكت جديد
-# =========================================================
 @bot.event
 async def on_guild_channel_create(channel):
     if channel.name.startswith("ticket-"):
@@ -110,9 +104,6 @@ async def on_guild_channel_create(channel):
         )
         await channel.send(embed=embed)
 
-# =========================================================
-# 5. الاستجابة للرسائل
-# =========================================================
 @bot.event
 async def on_message(message):
     if message.author.bot:
@@ -138,7 +129,6 @@ async def on_message(message):
                     contents.extend(uploaded_files)
                 contents.append(message.content)
 
-                # استخدام نموذج gemini-1.5-flash الرسمي والسريع
                 model = genai.GenerativeModel(
                     model_name="gemini-1.5-flash",
                     system_instruction=SYSTEM_INSTRUCTION
@@ -171,7 +161,13 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # =========================================================
-# 6. تشغيل البوت الصريح
+# 6. تشغيل البوت مع معالجة الاستثناءات لتجنب الكراش
 # =========================================================
 if __name__ == "__main__":
-    bot.run(DISCORD_TOKEN)
+    while True:
+        try:
+            bot.run(DISCORD_TOKEN)
+        except Exception as e:
+            print(f"⚠️ واجهنا انقطاع مؤقت في الاتصال بديسكورد: {e}")
+            print("⏳ جارٍ إعادة المحاولة خلال 10 ثوانٍ...")
+            time.sleep(10)
