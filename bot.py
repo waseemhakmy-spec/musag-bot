@@ -18,7 +18,8 @@ def home():
     return "Musag Bot is running 24/7!"
 
 def run_web():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = threading.Thread(target=run_web)
@@ -34,24 +35,22 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 genai.configure(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 2. قراءة ورفع ملفات الأنظمة والسوابق (مرة واحدة عند الإقلاع)
+# 2. قراءة ورفع ملفات الأنظمة والسوابق (من المجلد الحالي)
 # =========================================================
 uploaded_files = []
-laws_folder = "./laws"
+laws_folder = "." 
 
-if os.path.exists(laws_folder):
-    print("⏳ جاري فحص وقراءة مجلد الأنظمة والسوابق القضائية...")
-    for file_path in glob.glob(f"{laws_folder}/*.*"):
-        try:
-            # التحقق إذا الملف مرفوع مسبقاً أو رفعه جديد لتوفير الوقت
-            file_ref = genai.upload_file(file_path=file_path)
-            uploaded_files.append(file_ref)
-            print(f"✅ تم رفع واعتماد: {os.path.basename(file_path)}")
-        except Exception as e:
-            print(f"❌ تعذر رفع {os.path.basename(file_path)}: {e}")
+print("⏳ جاري فحص وقراءة ملفات الأنظمة والسوابق القضائية...")
+for file_path in glob.glob(f"{laws_folder}/*.txt"):
+    try:
+        file_ref = genai.upload_file(file_path=file_path)
+        uploaded_files.append(file_ref)
+        print(f"✅ تم رفع واعتماد: {os.path.basename(file_path)}")
+    except Exception as e:
+        print(f"❌ تعذر رفع {os.path.basename(file_path)}: {e}")
 
 # =========================================================
-# 3. التعليمات البرمجية للنظام (مُحسنة لسرعة الاستلال)
+# 3. التعليمات البرمجية للنظام (مُحسنة لسرعة ودقة الاستلال)
 # =========================================================
 SYSTEM_INSTRUCTION = """
 أنت مساعد قانوني ذكي واسمك 'مصاغ'، صُممت وقمت بإنشائك من قِبل طالب قانون على وشك التخرج لتكون أداة مساعدة لخدمة طلبة القانون والمهتمين وعامة المستفيدين في الأنظمة السعودية والسوابق القضائية.
@@ -79,7 +78,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 user_cooldowns = {}
-COOLDOWN_TIME = 5  # تقليص وقت الانتظار لتجربة أسرع وأسلس
+COOLDOWN_TIME = 5
 
 @bot.event
 async def on_ready():
@@ -105,7 +104,7 @@ async def on_guild_channel_create(channel):
         await channel.send(embed=embed)
 
 # =========================================================
-# 6. الاستجابة للرسائل (بأعلى أداء وسرعة ودقة استلال)
+# 6. الاستجابة للرسائل (باستخدام gemini-3.8-flash)
 # =========================================================
 @bot.event
 async def on_message(message):
@@ -127,12 +126,12 @@ async def on_message(message):
 
         async with message.channel.typing():
             try:
-                # دمج الملفات المرفوعة مع السؤال بمرونة لضمان السرعة والدقة
                 contents = []
                 if uploaded_files:
                     contents.extend(uploaded_files)
                 contents.append(message.content)
 
+                # استخدام نموذج gemini-3.8-flash
                 model = genai.GenerativeModel(
                     model_name="gemini-3.8-flash",
                     system_instruction=SYSTEM_INSTRUCTION
@@ -141,7 +140,7 @@ async def on_message(message):
                 response = model.generate_content(
                     contents=contents,
                     generation_config=genai.types.GenerationConfig(
-                        temperature=0.1  # خفضنا درجة الحرارة لتقليل التخبط وزيادة دقة الاقتباس والنصوص الحرفية
+                        temperature=0.1
                     )
                 )
 
