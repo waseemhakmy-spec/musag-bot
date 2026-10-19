@@ -43,7 +43,8 @@ laws_folder = "."
 print("⏳ جاري فحص وقراءة ملفات الأنظمة والسوابق القضائية...")
 for file_path in glob.glob(f"{laws_folder}/*.txt"):
     try:
-        file_ref = genai.upload_file(file_path=file_path)
+        # التعديل هنا: استخدام path بدلاً من file_path
+        file_ref = genai.upload_file(path=file_path)
         uploaded_files.append(file_ref)
         print(f"✅ تم رفع واعتماد: {os.path.basename(file_path)}")
     except Exception as e:
