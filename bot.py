@@ -35,23 +35,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 genai.configure(api_key=GEMINI_API_KEY)
 
-# =========================================================
-# 2. قراءة ورفع ملفات الأنظمة والسوابق (من المجلد الحالي)
-# =========================================================
 uploaded_files = []
-laws_folder = "." 
-
-print("⏳ جاري فحص وقراءة ملفات الأنظمة والسوابق القضائية...")
-for file_path in glob.glob(f"{laws_folder}/*.txt"):
-    try:
-        file_ref = genai.upload_file(path=file_path)
-        uploaded_files.append(file_ref)
-        print(f"✅ تم رفع واعتماد: {os.path.basename(file_path)}")
-    except Exception as e:
-        print(f"❌ تعذر رفع {os.path.basename(file_path)}: {e}")
 
 # =========================================================
-# 3. التعليمات البرمجية للنظام (مُحسنة للإجابة المباشرة وخيار IRAC الاختياري)
+# 2. التعليمات البرمجية للنظام
 # =========================================================
 SYSTEM_INSTRUCTION = """
 أنت مساعد قانوني ذكي واسمك 'مصاغ'، صُممت وقمت بإنشائك من قِبل طالب قانون على وشك التخرج لتكون أداة مساعدة لخدمة طلبة القانون والمهتمين وعامة المستفيدين في الأنظمة السعودية والسوابق القضائية.
@@ -69,7 +56,7 @@ SYSTEM_INSTRUCTION = """
 """
 
 # =========================================================
-# 4. إعدادات البوت والمهلة الزمنية
+# 3. إعدادات البوت والمهلة الزمنية
 # =========================================================
 intents = discord.Intents.default()
 intents.message_content = True
@@ -78,13 +65,35 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 user_cooldowns = {}
 COOLDOWN_TIME = 5
 
+# دالة لرفع الملفات في الخلفية حتى لا تعلق عملية دخول البوت
+async def load_laws_files():
+    global uploaded_files
+    laws_folder = "." 
+    print("⏳ جاري فحص وقراءة ملفات الأنظمة والسوابق القضائية في الخلفية...")
+    
+    loop = asyncio.get_event_loop()
+    files_to_upload = glob.glob(f"{laws_folder}/*.txt")
+    
+    for file_path in files_to_upload:
+        if file_path.endswith("requirements.txt"):
+            continue
+        try:
+            # رفع الملف بدون تعطيل الاتصال
+            file_ref = await loop.run_in_executor(None, lambda: genai.upload_file(path=file_path))
+            uploaded_files.append(file_ref)
+            print(f"✅ تم رفع واعتماد: {os.path.basename(file_path)}")
+        except Exception as e:
+            print(f"❌ تعذر رفع {os.path.basename(file_path)}: {e}")
+
 @bot.event
 async def on_ready():
-    print(f"✅ تم تشغيل البوت بنجاح باسم: {bot.user}")
+    print(f"✅ تم اتصال وتأكيد تشغيل البوت بنجاح باسم: {bot.user}")
     await bot.change_presence(activity=discord.Game(name="⚖️ الإفادات والتحليلات النظامية"))
+    # البدء في رفع الملفات بعد التأكد من أن البوت أصبح Online في ديسكورد
+    asyncio.create_task(load_laws_files())
 
 # =========================================================
-# 5. الترحيب التلقائي عند فتح تكت جديد
+# 4. الترحيب التلقائي عند فتح تكت جديد
 # =========================================================
 @bot.event
 async def on_guild_channel_create(channel):
@@ -102,7 +111,7 @@ async def on_guild_channel_create(channel):
         await channel.send(embed=embed)
 
 # =========================================================
-# 6. الاستجابة للرسائل مع المنشن والرد المباشر
+# 5. الاستجابة للرسائل
 # =========================================================
 @bot.event
 async def on_message(message):
@@ -129,8 +138,9 @@ async def on_message(message):
                     contents.extend(uploaded_files)
                 contents.append(message.content)
 
+                # استخدام نموذج gemini-1.5-flash الرسمي والسريع
                 model = genai.GenerativeModel(
-                    model_name="gemini-3.8-flash",
+                    model_name="gemini-1.5-flash",
                     system_instruction=SYSTEM_INSTRUCTION
                 )
 
@@ -142,8 +152,6 @@ async def on_message(message):
                 )
 
                 answer = response.text
-                
-                # إرفاق منشن صاحب السؤال في بداية الرد
                 full_response = f"{message.author.mention}\n\n{answer}"
 
                 if len(full_response) <= 1900:
@@ -163,6 +171,7 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # =========================================================
-# 7. تشغيل البوت
+# 6. تشغيل البوت الصريح
 # =========================================================
-bot.run(DISCORD_TOKEN)
+if __name__ == "__main__":
+    bot.run(DISCORD_TOKEN)
