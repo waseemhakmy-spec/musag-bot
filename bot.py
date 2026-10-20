@@ -39,12 +39,42 @@ if GEMINI_API_KEY:
 else:
     print("⚠️ لم يتم العثور على GEMINI_API_KEY في متغيرات البيئة!")
 
-uploaded_files = []
+# متغير لتخزين محتوى الأنظمة المدمج محلياً
+combined_laws_content = ""
 
 # =========================================================
-# 2. التعليمات البرمجية للنظام
+# 2. قراءة ملفات الأنظمة والسوابق محلياً بدون رفع سحابي
 # =========================================================
-SYSTEM_INSTRUCTION = """
+def load_laws_text():
+    global combined_laws_content
+    laws_folder = "."
+    files_to_read = glob.glob(f"{laws_folder}/*.txt")
+    
+    laws_text_list = []
+    print("⏳ جاري دمج وقراءة ملفات الأنظمة والسوابق القضائية محلياً...")
+    
+    for file_path in files_to_read:
+        if "requirements" in file_path:
+            continue
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                file_name = os.path.basename(file_path)
+                laws_text_list.append(f"\n--- بداية ملف النظام: {file_name} ---\n{content}\n--- نهاية الملف ---\n")
+                print(f"📖 تم قراءة واعتماد ملف النظام: {file_name}")
+        except Exception as e:
+            print(f"❌ تعذر قراءة {os.path.basename(file_path)}: {e}")
+            
+    combined_laws_content = "\n".join(laws_text_list)
+    print("✅ تمت قراءة ودمج جميع ملفات الأنظمة بنجاح محلياً!")
+
+# قراءة الملفات مباشرة في الذاكرة
+load_laws_text()
+
+# =========================================================
+# 3. التعليمات البرمجية للنظام
+# =========================================================
+BASE_SYSTEM_INSTRUCTION = """
 أنت مساعد قانوني ذكي واسمك 'مصاغ'، صُممت وقمت بإنشائك من قِبل طالب قانون على وشك التخرج لتكون أداة مساعدة لخدمة طلبة القانون والمهتمين وعامة المستفيدين في الأنظمة السعودية والسوابق القضائية.
 
 تعليمات الرد والإجابة:
@@ -59,8 +89,11 @@ SYSTEM_INSTRUCTION = """
 أسلوبك أخوي، مشجع، احترافي، دقيق، وداعم للطلاب.
 """
 
+# دمج تعليمات النظام مع محتوى الأنظمة القادمة من الملفات النصية
+SYSTEM_INSTRUCTION = f"{BASE_SYSTEM_INSTRUCTION}\n\n[نصوص الأنظمة والسوابق القضائية المعتمدة:\n{combined_laws_content}\n]"
+
 # =========================================================
-# 3. إعدادات البوت والمهلة الزمنية
+# 4. إعدادات البوت والمهلة الزمنية
 # =========================================================
 intents = discord.Intents.default()
 intents.message_content = True
@@ -69,30 +102,10 @@ bot = commands.Bot(command_prefix="!", intents=intents, reconnect=True)
 user_cooldowns = {}
 COOLDOWN_TIME = 5
 
-async def load_laws_files():
-    global uploaded_files
-    laws_folder = "." 
-    print("⏳ جاري فحص وقراءة ملفات الأنظمة والسوابق القضائية في الخلفية...")
-    loop = asyncio.get_running_loop()
-    files_to_upload = glob.glob(f"{laws_folder}/*.txt")
-    
-    for file_path in files_to_upload:
-        if file_path.endswith("requirements.txt"):
-            continue
-        try:
-            # إضافة المهلة وتنفيذ الرفع عبر الـ Executor لتجنب تجميد ديسكورد
-            file_ref = await loop.run_in_executor(None, lambda: genai.upload_file(path=file_path))
-            uploaded_files.append(file_ref)
-            print(f"✅ تم رفع واعتماد: {os.path.basename(file_path)}")
-            await asyncio.sleep(1) # مهلة زمنية بين كل رفع لمنع حظر الطلبات المكثفة
-        except Exception as e:
-            print(f"❌ تعذر رفع {os.path.basename(file_path)}: {e}")
-
 @bot.event
 async def on_ready():
     print(f"✅ تم اتصال وتأكيد تشغيل البوت بنجاح باسم: {bot.user}")
     await bot.change_presence(activity=discord.Game(name="⚖️ الإفادات والتحليلات النظامية"))
-    asyncio.create_task(load_laws_files())
 
 @bot.event
 async def on_guild_channel_create(channel):
@@ -129,22 +142,16 @@ async def on_message(message):
 
         async with message.channel.typing():
             try:
-                contents = []
-                if uploaded_files:
-                    contents.extend(uploaded_files)
-                contents.append(message.content)
-
                 model = genai.GenerativeModel(
                     model_name="gemini-3.8-flash",
                     system_instruction=SYSTEM_INSTRUCTION
                 )
 
-                # تنفيذ استدعاء التوليد بشكل لا يحظر Event Loop
                 loop = asyncio.get_running_loop()
                 response = await loop.run_in_executor(
                     None, 
                     lambda: model.generate_content(
-                        contents=contents,
+                        contents=message.content,
                         generation_config=genai.types.GenerationConfig(temperature=0.1)
                     )
                 )
@@ -169,7 +176,7 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # =========================================================
-# 6. تشغيل البوت
+# 5. تشغيل البوت
 # =========================================================
 if __name__ == "__main__":
     while True:
