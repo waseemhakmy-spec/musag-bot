@@ -331,34 +331,34 @@ def build_rag_database():
         embeddings = []
 
         for index, chunk in enumerate(chunks, start=1):
-            try:
-                embedding = create_embedding(
-                    chunk,
-                    "RETRIEVAL_DOCUMENT"
-                )
-
-                embeddings.append(embedding)
-
-                if index % 20 == 0:
-                    logger.info(
-                        "%s: تمت فهرسة %s من %s",
-                        file_name,
-                        index,
-                        len(chunks)
+            success = False
+            for attempt in range(5): # محاولات إعادة في حال الضغط
+                try:
+                    embedding = create_embedding(
+                        chunk,
+                        "RETRIEVAL_DOCUMENT"
                     )
+                    embeddings.append(embedding)
+                    success = True
+                    time.sleep(1.2) # تأخير إجباري لتفادي خطأ 429 RESOURCE_EXHAUSTED
+                    break
+                except Exception as e:
+                    logger.warning(f"تنبيه: ضغط طلبات عند المقطع {index} (المحاولة {attempt+1}/5). جاري الانتظار...")
+                    time.sleep(5 * (attempt + 1)) # انتظار تصاعدي
 
-            except Exception:
-                logger.exception(
-                    "فشل تضمين مقطع %s في %s",
-                    index,
-                    file_name
-                )
-
-                # لا نحفظ ملفًا بفهرسة جزئية؛
-                # حتى لا تختفي مواده بصمت من قاعدة المعرفة.
+            if not success:
+                logger.error(f"فشلت فهرسة المقطع {index} في {file_name}")
                 raise RuntimeError(
                     f"فشلت فهرسة الملف {file_name}. "
                     "تحقق من الاتصال وحدود API ثم أعد التشغيل."
+                )
+
+            if index % 20 == 0:
+                logger.info(
+                    "%s: تمت فهرسة %s من %s",
+                    file_name,
+                    index,
+                    len(chunks)
                 )
 
         new_files[file_name] = {
