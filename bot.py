@@ -254,7 +254,7 @@ def create_embedding(text, task_type):
 
 
 # =========================================================
-# 8. بناء الفهرس وحفظه
+# 8. بناء الفهرس وحفظه (الاعتماد على الفهرس الجاهز مباشرة)
 # =========================================================
 
 def build_rag_database():
@@ -262,8 +262,32 @@ def build_rag_database():
 
     logger.info("بدء تجهيز قاعدة المعرفة...")
 
-    file_paths = sorted(glob.glob("./*.txt"))
+    # إذا كان ملف الفهرس الجاهز موجوداً، نقوم بتحميله فوراً لتجنب أي ضغط أو 429
+    if os.path.exists(INDEX_FILE):
+        try:
+            with open(INDEX_FILE, "rb") as file:
+                saved_index = pickle.load(file)
+            
+            new_files = saved_index.get("files", {})
+            knowledge_chunks = []
+            knowledge_embeddings = []
 
+            for file_name in sorted(new_files):
+                data = new_files[file_name]
+                knowledge_chunks.extend(data["chunks"])
+                knowledge_embeddings.extend(data["embeddings"])
+
+            logger.info(
+                "✅ تم تحميل الفهرس الجاهز بنجاح: %s مقطعًا من %s ملفًا.",
+                len(knowledge_chunks),
+                len(new_files)
+            )
+            return
+        except Exception:
+            logger.exception("تعذر تحميل الفهرس الجاهز، سيتم إعادة بنائه.")
+
+    # في حال عدم توفر الفهرس الجاهز مسبقاً
+    file_paths = sorted(glob.glob("./*.txt"))
     source_files = {}
 
     for file_path in file_paths:
@@ -281,7 +305,6 @@ def build_rag_database():
                     "hash": get_file_hash(content),
                     "content": content
                 }
-
         except Exception:
             logger.exception("تعذر قراءة الملف: %s", file_name)
 
@@ -289,77 +312,27 @@ def build_rag_database():
         logger.warning("لم يتم العثور على ملفات TXT تحتوي على نصوص.")
         return
 
-    old_index = {}
-
-    if os.path.exists(INDEX_FILE):
-        try:
-            with open(INDEX_FILE, "rb") as file:
-                old_index = pickle.load(file)
-
-            if not isinstance(old_index, dict):
-                old_index = {}
-
-        except Exception:
-            logger.exception("تعذر تحميل الفهرس القديم، ستتم إعادة بنائه.")
-            old_index = {}
-
-    old_files = old_index.get("files", {})
     new_files = {}
 
     for file_name, data in source_files.items():
-        old_data = old_files.get(file_name)
-
-        # إذا لم يتغير الملف، نستخدم المقاطع والمتجهات المحفوظة.
-        if (
-            old_data
-            and old_data.get("hash") == data["hash"]
-            and old_data.get("chunks")
-            and len(old_data.get("chunks", []))
-                == len(old_data.get("embeddings", []))
-        ):
-            new_files[file_name] = old_data
-            logger.info("استخدام الفهرس المحفوظ: %s", file_name)
-            continue
-
-        logger.info("فهرسة الملف أو تحديثه: %s", file_name)
-
-        chunks = split_into_chunks(
-            file_name,
-            data["content"]
-        )
-
+        logger.info("فهرسة الملف: %s", file_name)
+        chunks = split_into_chunks(file_name, data["content"])
         embeddings = []
 
         for index, chunk in enumerate(chunks, start=1):
             success = False
-            for attempt in range(5): # محاولات إعادة في حال الضغط
+            for attempt in range(5):
                 try:
-                    embedding = create_embedding(
-                        chunk,
-                        "RETRIEVAL_DOCUMENT"
-                    )
+                    embedding = create_embedding(chunk, "RETRIEVAL_DOCUMENT")
                     embeddings.append(embedding)
                     success = True
-                    time.sleep(1.2) # تأخير إجباري لتفادي خطأ 429 RESOURCE_EXHAUSTED
+                    time.sleep(1.2)
                     break
-                except Exception as e:
-                    logger.warning(f"تنبيه: ضغط طلبات عند المقطع {index} (المحاولة {attempt+1}/5). جاري الانتظار...")
-                    time.sleep(5 * (attempt + 1)) # انتظار تصاعدي
+                except Exception:
+                    time.sleep(5 * (attempt + 1))
 
             if not success:
-                logger.error(f"فشلت فهرسة المقطع {index} في {file_name}")
-                raise RuntimeError(
-                    f"فشلت فهرسة الملف {file_name}. "
-                    "تحقق من الاتصال وحدود API ثم أعد التشغيل."
-                )
-
-            if index % 20 == 0:
-                logger.info(
-                    "%s: تمت فهرسة %s من %s",
-                    file_name,
-                    index,
-                    len(chunks)
-                )
+                raise RuntimeError(f"فشلت فهرسة الملف {file_name}.")
 
         new_files[file_name] = {
             "hash": data["hash"],
@@ -367,13 +340,11 @@ def build_rag_database():
             "embeddings": embeddings
         }
 
-    # إعادة بناء القوائم بالترتيب نفسه.
     knowledge_chunks = []
     knowledge_embeddings = []
 
     for file_name in sorted(new_files):
         data = new_files[file_name]
-
         knowledge_chunks.extend(data["chunks"])
         knowledge_embeddings.extend(data["embeddings"])
 
@@ -383,13 +354,8 @@ def build_rag_database():
     }
 
     temporary_file = INDEX_FILE + ".tmp"
-
     with open(temporary_file, "wb") as file:
-        pickle.dump(
-            saved_index,
-            file,
-            protocol=pickle.HIGHEST_PROTOCOL
-        )
+        pickle.dump(saved_index, file, protocol=pickle.HIGHEST_PROTOCOL)
 
     os.replace(temporary_file, INDEX_FILE)
 
@@ -442,7 +408,6 @@ def retrieve_relevant_laws(query, top_k=TOP_K):
         where=denominator != 0
     )
 
-    # نأخذ أفضل النتائج، ثم نضيفها مع مراعاة حجم السياق.
     top_indices = np.argsort(similarities)[::-1]
 
     retrieved_texts = []
@@ -486,7 +451,6 @@ bot = commands.Bot(
 
 user_cooldowns = {}
 
-# منع تنفيذ عدد كبير من طلبات AI بالتزامن.
 ai_semaphore = asyncio.Semaphore(3)
 
 
@@ -605,7 +569,6 @@ async def on_message(message):
                     question
                 )
 
-                # التعليمات الثابتة منفصلة عن النصوص المسترجعة.
                 system_prompt = [
                     {
                         "type": "text",
@@ -688,11 +651,6 @@ async def on_message(message):
 # =========================================================
 
 if __name__ == "__main__":
-    # 1. تشغيل السيرفر الوهمي أولاً لإخبار Render أن البوت يعمل ويفتح البورت
     keep_alive()
-
-    # 2. بدء فهرسة الأنظمة
     build_rag_database()
-
-    # 3. تشغيل ديسكورد
     bot.run(DISCORD_TOKEN)
